@@ -48,6 +48,24 @@ static float cvs_e_RV_max(const CVS_Model m)
     return e_RV_max;
 }
 
+static float calculate_k_0(float hr)
+{
+    float k_0;
+
+    float hr2 = hr * hr;
+
+    k_0 = (hr2 * -0.0041) + (-0.0417 * hr) + 257.5;
+
+    return k_0;
+}
+
+static float calculate_k_1(float hr)
+{
+    float k_1;
+
+    return k_1;
+}
+
 void cvs_calculate_e_RV(CVS_Model *m)
 {
     float e_RV = 0.0f;
@@ -56,10 +74,20 @@ void cvs_calculate_e_RV(CVS_Model *m)
     float e_RV_min = cvs_e_RV_min(*m);
     float e_RV_max = cvs_e_RV_max(*m);
 
+    float freq = hr / 60;
+    float T = 1 / freq;
+    float t_beat = fmodf(m->time, T); // time in beat
+    float t_es = 0.35 / freq;         // time end systolic
+    float t_n = t_beat / t_es;
+    float t_h = 1 / freq;
+
+    float k_0 = calculate_k_0(hr);
+    float k_1 = calculate_k_1(hr);
+    float t_ce = k_0 + (k_1 * t_h);
+
     float phi = 0.0f;
 
     phi = () * ();
 
     e_RV = (e_RV_max * phi) + (e_RV_min * (1 - phi));
-
 }

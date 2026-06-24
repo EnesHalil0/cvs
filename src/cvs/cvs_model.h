@@ -1,7 +1,5 @@
 #include <stdbool.h>
 
-extern float time;
-
 typedef struct
 {
     bool heart_failure;
@@ -25,11 +23,24 @@ typedef struct
 
 typedef struct
 {
+    float RV;
+} CVS_Pressures;
+
+typedef struct
+{
+    float RV;
+} CVS_Flows;
+
+typedef struct
+{
     CVS_Volumes V;
+    CVS_Pressures P;
+    CVS_Flows Q;
 } CVS_States;
 
 typedef struct
 {
+    float time;
     float heart_rate;
     CVS_Conditions c;
     CVS_Params p;
