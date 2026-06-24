@@ -1,5 +1,7 @@
 #include <stdbool.h>
 
+#define CVS_PI 3.14159265358979323846f
+
 typedef struct
 {
     bool heart_failure;

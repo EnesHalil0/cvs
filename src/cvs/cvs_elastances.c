@@ -69,6 +69,28 @@ static float calculate_k_1(float hr)
     return k_1;
 }
 
+static bool cvs_is_RV_active(float t_beat, float t_ce)
+{
+    if (t_ce <= 0.0f)
+    {
+        return false;
+    }
+
+    return (t_beat >= 0.0f) && (t_beat < t_ce);
+}
+
+static float cvs_calculate_phi_RV(float t_beat, float t_ce)
+{
+    if (!cvs_is_RV_active(t_beat, t_ce))
+    {
+        return 0.0f;
+    }
+
+    float x = CVS_PI * t_beat / t_ce;
+
+    return 0.9f * sinf(x) - 0.25f * sinf(2.0f * x);
+}
+
 void cvs_calculate_e_RV(CVS_Model *m)
 {
     float e_RV = 0.0f;
@@ -88,9 +110,9 @@ void cvs_calculate_e_RV(CVS_Model *m)
     float k_1 = calculate_k_1(hr);
     float t_ce = k_0 + (k_1 * t_h);
 
-    float phi = 0.0f;
-
-    phi = (() - ()) * ();
+    float phi = cvs_calculate_phi_RV(t_beat, t_ce);
 
     e_RV = (e_RV_max * phi) + (e_RV_min * (1 - phi));
+
+    m->p.e.RV = e_RV;
 }
