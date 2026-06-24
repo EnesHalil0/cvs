@@ -54,7 +54,7 @@ static float calculate_k_0(float hr)
 
     float hr2 = hr * hr;
 
-    k_0 = (hr2 * -0.0041) + (-0.0417 * hr) + 257.5;
+    k_0 = ((hr2 * -0.0041) + (-0.0417 * hr) + 257.5) * (1 / 1000);
 
     return k_0;
 }
@@ -62,6 +62,9 @@ static float calculate_k_0(float hr)
 static float calculate_k_1(float hr)
 {
     float k_1;
+    float hr2 = hr * hr;
+
+    k_1 = ((hr2 * 0.0158) + (-5.0417 * hr) + 445.5) * (1 / 1000);
 
     return k_1;
 }
@@ -87,7 +90,7 @@ void cvs_calculate_e_RV(CVS_Model *m)
 
     float phi = 0.0f;
 
-    phi = () * ();
+    phi = (() - ()) * ();
 
     e_RV = (e_RV_max * phi) + (e_RV_min * (1 - phi));
 }
