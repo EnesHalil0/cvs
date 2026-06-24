@@ -11,6 +11,12 @@ typedef struct
 typedef struct
 {
     float RV;
+    float RA;
+    float V;
+    float Ao;
+    float LV;
+    float LA;
+    float P;
 } CVS_Elastances;
 
 typedef struct
