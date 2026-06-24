@@ -4,13 +4,18 @@ TARGET := cvs.exe
 
 SRC_DIR     := src
 BUILD_DIR   := build
-INCLUDE_DIR := include
+INCLUDE_DIR := src/cvs
 
 CFLAGS  := -Wall -Wextra -O3 -I$(INCLUDE_DIR)
 LDFLAGS :=
 
-SRCS := $(wildcard $(SRC_DIR)/*.c)
+SRC_DIR := src
+BUILD_DIR := build
+
+SRCS := $(shell find $(SRC_DIR) -type f -name "*.c")
 OBJS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SRCS))
+
+
 
 all: $(TARGET)
 
@@ -18,7 +23,7 @@ $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	@mkdir -p $(BUILD_DIR)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

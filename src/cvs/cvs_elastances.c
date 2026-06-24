@@ -102,8 +102,8 @@ void cvs_calculate_e_RV(CVS_Model *m)
     float freq = hr / 60;
     float T = 1 / freq;
     float t_beat = fmodf(m->time, T); // time in beat
-    float t_es = 0.35 / freq;         // time end systolic
-    float t_n = t_beat / t_es;
+    // float t_es = 0.35 / freq;         // time end systolic
+    // float t_n = t_beat / t_es; 
     float t_h = 1 / freq;
 
     float k_0 = calculate_k_0(hr);
