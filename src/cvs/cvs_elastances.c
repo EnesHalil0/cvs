@@ -1,7 +1,10 @@
 #include "cvs_elastances.h"
 #include <math.h>
+#include <stdio.h>
 
-static float cvs_e_RV_min(const CVS_Model m)
+#define CVS_PI 3.14159265358979323846f
+
+static float cvs_e_RV_min(CVS_Parameters params, CVS_States states)
 {
     float e_RV_min = 0;
 
@@ -9,11 +12,11 @@ static float cvs_e_RV_min(const CVS_Model m)
     float b_RV = 0.03776;
     float c_RV;
 
-    float hr = m.heart_rate;
+    float hr = params.heart_rate;
     float hr2 = hr * hr;
 
     // calculate c_RV according to heart failure condition
-    if (m.c.heart_failure)
+    if (params.heart_failure)
     {
         c_RV = ((hr * -333.33) + 110000) * (1 / 1000);
     }
@@ -22,21 +25,21 @@ static float cvs_e_RV_min(const CVS_Model m)
         c_RV = (0.0167 * hr2) - (3.3333 * hr) + 290;
     }
 
-    float u = (m.s.V.RV - c_RV) * b_RV;
+    float u = (states.V[NODE_RV] - c_RV) * b_RV;
 
     e_RV_min = a_RV * (expf(u) + 1);
 
     return e_RV_min;
 }
 
-static float cvs_e_RV_max(const CVS_Model m)
+static float cvs_e_RV_max(CVS_Parameters params)
 {
     float e_RV_max = 0.0f;
 
-    float hr = m.heart_rate;
+    float hr = params.heart_rate;
     float hr2 = hr * hr;
 
-    if (m.c.heart_failure)
+    if (params.heart_failure)
     {
         e_RV_max = ((0.0056 * hr2) - (0.6667 * hr) + 60) * (1 / 100);
     }
@@ -91,19 +94,19 @@ static float cvs_calculate_phi_RV(float t_beat, float t_ce)
     return 0.9f * sinf(x) - 0.25f * sinf(2.0f * x);
 }
 
-void cvs_calculate_e_RV(CVS_Model *m)
+void cvs_calculate_e_RV(CVS_Parameters params, CVS_States states, CVS_Simulation sim)
 {
     float e_RV = 0.0f;
-    float hr = m->heart_rate;
+    float hr = params.heart_rate;
 
-    float e_RV_min = cvs_e_RV_min(*m);
-    float e_RV_max = cvs_e_RV_max(*m);
+    float e_RV_min = cvs_e_RV_min(params, states);
+    float e_RV_max = cvs_e_RV_max(params);
 
     float freq = hr / 60;
     float T = 1 / freq;
-    float t_beat = fmodf(m->time, T); // time in beat
+    float t_beat = fmodf(sim.t, T); // time in beat
     // float t_es = 0.35 / freq;         // time end systolic
-    // float t_n = t_beat / t_es; 
+    // float t_n = t_beat / t_es;
     float t_h = 1 / freq;
 
     float k_0 = calculate_k_0(hr);
@@ -114,5 +117,5 @@ void cvs_calculate_e_RV(CVS_Model *m)
 
     e_RV = (e_RV_max * phi) + (e_RV_min * (1 - phi));
 
-    m->p.e.RV = e_RV;
+    params.e[NODE_RV] = e_RV;
 }

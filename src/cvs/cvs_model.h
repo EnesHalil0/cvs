@@ -1,56 +1,55 @@
+#ifndef CVS_MODEL_H
+#define CVS_MODEL_H
+
 #include <stdbool.h>
 
-#define CVS_PI 3.14159265358979323846f
+/*
+ * CVS_Node: parametre arraylerinde daha rahat kullanabilmek icin aslinda
+ * bir indeksi her zaman bir CVS Node'una atamis oluyoruz.
+ */
+typedef enum
+{
+	NODE_RA, // Right Atrium
+	NODE_RV, // Right Ventricle
+	NODE_P,	 // Pulmonary circulation
+	NODE_LA, // Left Atrium
+	NODE_LV, // Left Ventricle
+	NODE_AO, // Aorta
+	NODE_V,	 // Veins
 
+	NODE_COUNT // Number of node
+} CVS_Node;
+
+/*
+ * CVS_Parameters: CVS'in karakteristigini belirleyen parametreler
+ * farkli kosullarda genelde bunlar degisiyor.
+ */
 typedef struct
 {
-    bool heart_failure;
-    bool exercise;
-} CVS_Conditions;
+	float heart_rate;
 
+	float e[NODE_COUNT];
+	float g[NODE_COUNT];
+
+	bool heart_failure;
+	bool exercise;
+} CVS_Parameters;
+
+/*
+ * CVS_States: Genelde gozlemledigimiz ve simulasyonu dondurme amaclarimiz
+ */
 typedef struct
 {
-    float RV;
-    float RA;
-    float V;
-    float Ao;
-    float LV;
-    float LA;
-    float P;
-} CVS_Elastances;
-
-typedef struct
-{
-    CVS_Elastances e;
-} CVS_Params;
-
-typedef struct
-{
-    float RV;
-} CVS_Volumes;
-
-typedef struct
-{
-    float RV;
-} CVS_Pressures;
-
-typedef struct
-{
-    float RV;
-} CVS_Flows;
-
-typedef struct
-{
-    CVS_Volumes V;
-    CVS_Pressures P;
-    CVS_Flows Q;
+	float P[NODE_COUNT];
+	float Q[NODE_COUNT];
+	float V[NODE_COUNT];
 } CVS_States;
 
 typedef struct
 {
-    float time;
-    float heart_rate;
-    CVS_Conditions c;
-    CVS_Params p;
-    CVS_States s;
-} CVS_Model;
+	float t;
+	float dt;
+	float duration;
+} CVS_Simulation;
+
+#endif // CVS_MODEL_H

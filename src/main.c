@@ -3,18 +3,26 @@
 
 int main(void)
 {
-    CVS_Model cvs = {0};
+    CVS_Simulation cvs_simulation = {
+        .t = 0.0,
+        .dt = 1e-3,
+        .duration = 40.0,
+    };
 
-    float dt = 1e-3; // 0.001 10^-3
-    for (float i = 0; i < 40; i += dt)
+    CVS_Parameters cvs_parameters = {
+        .heart_rate = 60.0f,
+    };
+
+    CVS_States cvs_states = {0};
+
+    while (cvs_simulation.t < cvs_simulation.duration)
     {
-        cvs.time = i;
 
-        cvs_calculate_e_RV(&cvs);
+        cvs_calculate_e_RV(cvs_parameters, cvs_states, cvs_simulation);
 
-        float e_RV = cvs.p.e.RV; 
+        printf("e_RV = %f\n", cvs_parameters.e[NODE_RV]);
 
-        printf("e_RV = %f\n", e_RV);
+        cvs_simulation.t += cvs_simulation.dt;
     }
 
     return 0;

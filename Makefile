@@ -6,7 +6,8 @@ SRC_DIR     := src
 BUILD_DIR   := build
 INCLUDE_DIR := src/cvs
 
-CFLAGS  := -Wall -Wextra -O3 -I$(INCLUDE_DIR)
+# CFLAGS  := -Wall -Wextra -O3 -I$(INCLUDE_DIR)
+CFLAGS  := -Wall -Wextra -O0 -ggdb -I$(INCLUDE_DIR)
 LDFLAGS :=
 
 SRC_DIR := src
