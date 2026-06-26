@@ -30,6 +30,7 @@ typedef struct
 
 	float e[NODE_COUNT];
 	float g[NODE_COUNT];
+	float V0[NODE_COUNT];
 
 	bool heart_failure;
 	bool exercise;

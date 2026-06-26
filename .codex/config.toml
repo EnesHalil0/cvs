@@ -1,0 +1,5 @@
+
+[mcp_servers.matlab]
+command = "C:/Users/ehd/.matlab/agentic-toolkits/bin/matlab-mcp-server.exe"
+args = ["--matlab-session-mode=existing", "--extension-file=C:/Users/ehd/.matlab/agentic-toolkits/simulink/tools/tools.json"]
+tool_timeout_sec = 600

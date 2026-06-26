@@ -1,4 +1,25 @@
-cvs.exe
-build
+# Build outputs
+build/
+*.o
+*.obj
+*.exe
+
+# Simulation outputs generated locally
+output.csv
+reference.csv
+reference_test.csv
+*.png
+
+# Python local environment/cache
+.venv/
+__pycache__/
+*.py[cod]
+
+# MATLAB/Simulink generated files
+slprj/
+**/slprj/
+*.slxc
+*.autosave
+
+# Local/editor noise
 .autosave
-bak/slprj
