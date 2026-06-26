@@ -54,15 +54,88 @@
   - Current status: basic node enum, parameters, states, and simulation structs exist.
   - Decide whether the shared model should also include resistances/conductances, unstressed volumes, total blood volume, valve state, and reference-condition flags.
   - Decide whether to introduce a single `CVS_Model` struct that owns `CVS_Parameters`, `CVS_States`, and `CVS_Simulation`.
+- [ ] Design a solver-independent model API.
+  - Add a `CVS_Model` owner struct for parameters, states, and simulation time.
+  - Add a `CVS_SolverType` enum with at least `CVS_SOLVER_EULER`, `CVS_SOLVER_HEUN`, and `CVS_SOLVER_RK4`.
+  - Add a `CVS_Solver` struct containing solver type and `dt`.
+  - Add `cvs_model_init()` and `cvs_model_step()` so PC, benchmark, and STM32 code call the same model core.
+  - Keep Euler as the baseline solver for Simulink `ode1` validation.
 - [ ] Improve README.
   - Current status: `README.md` only has a title.
   - Add project purpose, folder structure, build commands, run commands, MSYS2 requirements, Python venv setup, and plotting workflow.
+
+## TIPTEKNO Paper Tasks
+
+- [ ] Rewrite the abstract around the contribution order.
+  - Motivation: HMC/VAD testing and previous dSPACE/Simulink HMC.
+  - Contribution 1: embedded-oriented C reimplementation of the seven-state CVS model.
+  - Contribution 2: C-Euler validation against Simulink `ode1` using matched settings.
+  - Contribution 3: C vs MATLAB/Simulink runtime benchmark.
+  - Contribution 4: solver interface and Euler/Heun/RK4 trade-off evaluation.
+  - Contribution 5: STM32 processor-in-the-loop preparation.
+- [ ] Keep the main validation scope narrow.
+  - Compare Simulink only against the C Euler implementation.
+  - Run Simulink with fixed-step `ode1` / Euler, same `dt`, same duration, same initial conditions, and same parameter flags.
+  - Do not claim RK4 or Heun is "closer to Simulink ode1"; that would be the wrong comparison target.
+- [ ] Produce the minimum paper figures.
+  - Workflow: Simulink reference -> C implementation -> validation -> benchmark -> STM32/PIL.
+  - Seven-state CVS circulation diagram.
+  - C software architecture diagram with model core, solver, runner, output, and embedded layer.
+  - Simulink `ode1` vs C Euler pressure/volume overlays.
+  - LV pressure-volume loop comparison.
+- [ ] Produce the minimum paper tables.
+  - Model states and units.
+  - C module mapping to equations.
+  - Simulink `ode1` vs C Euler error metrics.
+  - C vs MATLAB/Simulink runtime and per-step timing.
+  - Solver/dt accuracy-runtime trade-off.
+- [ ] Write the paper discussion around honest claims.
+  - C Euler reproduces the existing Simulink `ode1` reference.
+  - Higher-order solvers are evaluated as alternative embedded integration choices, not as Simulink-validation replacements.
+  - STM32 work should be described as "PIL target" or "feasibility" until real board timing is measured.
 
 ## Next Model Equations
 
 - [x] Add automated reference comparison.
   - Compare `output.csv` against Simulink-exported `reference.csv` generated from the same timestep and parameter flags.
   - Report max/mean absolute error for `V`, `P`, and `Q`.
+- [ ] Separate derivative calculation from integration.
+  - Add a function that computes `dV/dt = Q_in - Q_out` without directly updating state.
+  - Let Euler, Heun, and RK4 use this derivative function.
+  - Keep pressure, elastance, and flow recalculation inside each derivative evaluation so intermediate RK stages are physically consistent.
+
+## Solver Comparison Tasks
+
+- [ ] Implement C Euler through the new `CVS_Solver` interface.
+  - Confirm output is unchanged relative to the current Euler update.
+  - Use this mode for Simulink `ode1` validation.
+- [ ] Implement Heun solver.
+  - Predictor: one Euler trial step.
+  - Corrector: average derivative at current and predicted states.
+  - Verify total blood volume conservation after each corrected step.
+- [ ] Implement RK4 solver.
+  - Compute four derivative stages with intermediate states.
+  - Recompute elastance, pressure, and flow at each intermediate stage.
+  - Verify runtime cost and memory usage remain acceptable for embedded use.
+- [ ] Define a high-resolution offline reference for solver comparison.
+  - Preferred reference: C RK4 with very small `dt`, for example 0.01 ms or 0.005 ms, using `double` if available.
+  - Use this only for solver accuracy studies, not for Simulink equivalence claims.
+- [ ] Evaluate solver quality with signal metrics.
+  - RMSE and NRMSE for all V/P/Q signals.
+  - MaxAbsError for switching-sensitive flow signals.
+  - Optional phase/time-shift error for pressure peaks.
+- [ ] Evaluate solver quality with physiological feature metrics.
+  - MAP.
+  - Systolic and diastolic aortic pressure.
+  - LV EDV, ESV, SV, EF.
+  - Cardiac output.
+  - LV PV-loop area or shape error.
+- [ ] Evaluate solver quality with embedded feasibility metrics.
+  - Per-step runtime.
+  - Real-time ratio.
+  - Deadline margin for `dt = 1 ms`, `0.5 ms`, and `0.1 ms`.
+  - Numerical stability at larger `dt`.
+  - Absence of negative compartment volumes.
 
 ## Verification Tasks
 
@@ -76,3 +149,24 @@
 - [ ] Add focused tests or regression checks.
   - At minimum, test elastance values at selected `HR`, `t`, `V_LV`, and `V_RV` points.
   - Include normal, heart failure, and exercise branches.
+
+## STM32 / Processor-in-the-Loop Tasks
+
+- [ ] Choose the first PIL host workflow.
+  - Recommended: Python host using USB CDC/UART for command, telemetry, CSV logging, and plotting.
+  - MATLAB/Simulink should generate `reference.csv` and can be used for final metrics/figures.
+  - Avoid making the first PIL prototype depend on a live Simulink host loop.
+- [ ] Define a simple serial protocol.
+  - Host sends `init` with HR, scenario flags, `dt`, duration, and sample decimation.
+  - Host sends `step` or `run N` command.
+  - STM32 returns selected states/signals: time, V_LV, P_LV, P_AO, Q_LV, e_LV, e_RV.
+  - Use binary packets later if CSV text telemetry is too slow.
+- [ ] Build the STM32 timing experiment.
+  - Run model step from a timer-driven loop or a controlled benchmark loop.
+  - Measure per-step time using DWT cycle counter or a hardware timer.
+  - Report average, maximum, and worst-case step time.
+  - Compare step time against 1 ms, 0.5 ms, and 0.1 ms deadlines.
+- [ ] Compare STM32 output against host reference.
+  - Save `stm32_output.csv`.
+  - Compare against C PC Euler output and Simulink `reference.csv`.
+  - Report numerical drift and timing margin separately.
