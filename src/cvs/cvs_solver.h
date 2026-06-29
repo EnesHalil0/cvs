@@ -1,21 +1,13 @@
-#ifndef CVS_SIM_ENGINE_H
-#define CVS_SIM_ENGINE_H
+#ifndef CVS_SOLVER_H
+#define CVS_SOLVER_H
 
-// Simulation and Model Constants
-#define DT 0.01         
-#define SIM_STEPS 500
-#define R_RESISTANCE 1.0  
-#define C_COMPLIANCE 2.5  
+#include "cvs_model.h"
 
-// Solver Configuration Types
-typedef enum {
-    SOLVER_EULER,
-    SOLVER_RK4
-} SolverType;
+// Solver fonksiyonları için ortak Function Pointer tipi
+typedef float (*CVS_SolverFunc)(float current_v, float v_dot, float dt);
 
-// Function Prototypes
-double cvs_derivative(double t, double P);
+// Gelişmiş matematik motorları
+float euler_volume_step(float current_v, float v_dot, float dt);
+float rk4_volume_step(float current_v, float v_dot, float dt);
 
-void run_cvs_simulation(SolverType active_solver, long long steps);
-
-#endif // CVS_SIM_ENGINE_H
+#endif // CVS_SOLVER_H
