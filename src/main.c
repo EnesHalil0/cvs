@@ -1,23 +1,19 @@
 #include <stdio.h>
-#include "cvs_elastances.h"
-#include "cvs_flows.h"
+#include "cvs_core.h"
 #include "cvs_output.h"
-#include "cvs_pressures.h"
-#include "cvs_volumes.h"
 
 int main(void)
 {
-    CVS_Simulation cvs_simulation = {
-        .t = 0.0,
+    CVS_ModelConfig cvs_config = {
+        .heart_rate = 60.0f,
         .dt = 1e-4,
         .duration = 40.0,
+        .heart_failure = true,
+        .exercise = false,
+        .solver_type = CVS_SOLVER_EULER,
     };
 
-    CVS_Parameters cvs_parameters = {
-        .heart_rate = 60.0f,
-    };
-
-    CVS_States cvs_states = {0};
+    CVS_Model cvs_model;
     FILE *output_file = fopen("output.csv", "w");
 
     if (output_file == NULL)
@@ -26,22 +22,18 @@ int main(void)
         return 1;
     }
 
-    cvs_initialize_volume_defaults(&cvs_states);
-    cvs_initialize_pressure_defaults(&cvs_parameters);
-    cvs_initialize_flow_defaults(&cvs_parameters);
+    cvs_model_init(&cvs_model, &cvs_config);
     cvs_write_output_header(output_file);
 
-    int step_count = (int)((cvs_simulation.duration / cvs_simulation.dt) + 0.5f);
+    int step_count = (int)((cvs_config.duration / cvs_config.dt) + 0.5f);
 
     for (int step = 0; step < step_count; ++step)
     {
-        cvs_simulation.t = (float)(step + 1) * cvs_simulation.dt;
-
-        cvs_calculate_elastances(&cvs_parameters, cvs_states, cvs_simulation);
-        cvs_calculate_pressures(&cvs_parameters, &cvs_states);
-        cvs_calculate_flows(&cvs_parameters, &cvs_states);
-        cvs_calculate_volumes(&cvs_states, cvs_simulation);
-        cvs_write_output_row(output_file, cvs_simulation, &cvs_parameters, &cvs_states);
+        cvs_model_step(&cvs_model);
+        cvs_write_output_row(output_file,
+                             cvs_model_get_simulation(&cvs_model),
+                             cvs_model_get_params(&cvs_model),
+                             cvs_model_get_state(&cvs_model));
     }
 
     fclose(output_file);

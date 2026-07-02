@@ -12,6 +12,7 @@ reference_test.csv
 
 # Python local environment/cache
 .venv/
+.tools/
 __pycache__/
 *.py[cod]
 

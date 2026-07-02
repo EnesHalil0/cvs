@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CVS WASM Live Plot Smoke Test</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 2rem;
+      line-height: 1.5;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+      margin: 0.75rem 0 1rem;
+    }
+
+    button,
+    input {
+      padding: 0.45rem 0.6rem;
+    }
+
+    .plot {
+      width: 100%;
+      max-width: 960px;
+      height: 450px;
+      margin-top: 1rem;
+    }
+
+    pre {
+      background: #f4f4f4;
+      padding: 1rem;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>CVS WASM Live Plot Smoke Test</h1>
+  <div id="status">Loading WASM module...</div>
+
+  <div class="controls">
+    <button id="start" type="button" disabled>Start</button>
+    <button id="stop" type="button" disabled>Stop</button>
+    <button id="reset" type="button" disabled>Reset</button>
+    <label>
+      <input type="checkbox" id="follow-latest" checked>
+      Follow latest
+    </label>
+    <label>
+      Window [s]:
+      <input type="number" id="window-seconds" value="5" min="1" step="1">
+    </label>
+    <label>
+      Steps/frame:
+      <input type="number" id="steps-per-frame" value="500" min="1" step="50">
+    </label>
+    <label>
+      Sample every:
+      <input type="number" id="sample-every" value="20" min="1" step="1">
+    </label>
+    <label>
+      Pressure line width:
+      <input type="range" id="pressure-line-width" min="1" max="8" value="2" step="1">
+    </label>
+    <label>
+      PV loop line width:
+      <input type="range" id="pv-line-width" min="1" max="8" value="2" step="1">
+    </label>
+    <label>
+      Pressure plot height [px]:
+      <input type="range" id="pressure-plot-height" min="250" max="900" value="450" step="25">
+    </label>
+    <label>
+      PV plot height [px]:
+      <input type="range" id="pv-plot-height" min="250" max="900" value="450" step="25">
+    </label>
+    <label>
+      Heart failure:
+      <select id="heart-failure">
+        <option value="0">Normal</option>
+        <option value="1">Heart failure</option>
+      </select>
+    </label>
+    <label>
+      Exercise:
+      <select id="exercise">
+        <option value="0">Rest</option>
+        <option value="1">Exercise</option>
+      </select>
+    </label>
+    <label>
+      PV steady-state start [s]:
+      <input type="number" id="pv-steady-start" value="5" min="0" step="0.5">
+    </label>
+    <label>
+      <input type="checkbox" id="show-pv-transient">
+      Show PV transient
+    </label>
+    <button id="show-pv-loop" type="button" disabled>Show / Update PV Loop</button>
+    <button id="hide-pv-loop" type="button" disabled>Hide PV Loop</button>
+  </div>
+
+  <div id="pressure-plot" class="plot"></div>
+  <div id="pv-loop-section" style="display:none;">
+    <div id="pv-loop" class="plot"></div>
+  </div>
+  <pre id="output"></pre>
+
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="cvs_wasm.js"></script>
+  <script>
+    const statusElement = document.getElementById("status");
+    const outputElement = document.getElementById("output");
+    const startButton = document.getElementById("start");
+    const stopButton = document.getElementById("stop");
+    const resetButton = document.getElementById("reset");
+    const followLatestInput = document.getElementById("follow-latest");
+    const windowSecondsInput = document.getElementById("window-seconds");
+    const stepsPerFrameInput = document.getElementById("steps-per-frame");
+    const sampleEveryInput = document.getElementById("sample-every");
+    const pressureLineWidthInput = document.getElementById("pressure-line-width");
+    const pvLineWidthInput = document.getElementById("pv-line-width");
+    const pressurePlotHeightInput = document.getElementById("pressure-plot-height");
+    const pvPlotHeightInput = document.getElementById("pv-plot-height");
+    const heartFailureInput = document.getElementById("heart-failure");
+    const exerciseInput = document.getElementById("exercise");
+    const pvSteadyStartInput = document.getElementById("pv-steady-start");
+    const showPVTransientInput = document.getElementById("show-pv-transient");
+    const showPVLoopButton = document.getElementById("show-pv-loop");
+    const hidePVLoopButton = document.getElementById("hide-pv-loop");
+    const pvLoopSection = document.getElementById("pv-loop-section");
+
+    let running = false;
+    let followLatest = true;
+    let animationFrameId = 0;
+    let sampleCounter = 0;
+    let frameCounter = 0;
+    let lastStatusUpdateMs = performance.now();
+    let lastStatusTime = 0;
+    let simulatedSecondsPerRealSecond = 0;
+    let pvLoopVisible = false;
+    let pvLoopLastPointCount = 0;
+
+    const dt = 1e-4;
+    const duration = 40.0;
+    const memoryWarningSamples = 1000000;
+    const history = {
+      t: [],
+      pLV: [],
+      pAO: [],
+      vLV: []
+    };
+    const plotConfig = {
+      responsive: true,
+      scrollZoom: true,
+      displaylogo: false
+    };
+
+    function setControlsEnabled(enabled) {
+      startButton.disabled = !enabled;
+      stopButton.disabled = !enabled;
+      resetButton.disabled = !enabled;
+      showPVLoopButton.disabled = !enabled;
+      hidePVLoopButton.disabled = !enabled;
+    }
+
+    function readWindowSeconds() {
+      const value = Number(windowSecondsInput.value);
+
+      if (!Number.isFinite(value) || value < 1) {
+        return 5.0;
+      }
+
+      return value;
+    }
+
+    function readPositiveInteger(input, fallback) {
+      const value = Number(input.value);
+
+      if (!Number.isFinite(value) || value < 1) {
+        return fallback;
+      }
+
+      return Math.max(1, Math.floor(value));
+    }
+
+    function readStepsPerFrame() {
+      return readPositiveInteger(stepsPerFrameInput, 500);
+    }
+
+    function readSampleEvery() {
+      return readPositiveInteger(sampleEveryInput, 20);
+    }
+
+    function readLineWidth(input) {
+      const value = Number(input.value);
+
+      if (!Number.isFinite(value) || value < 1) {
+        return 2;
+      }
+
+      return Math.max(1, Math.min(8, value));
+    }
+
+    function readPlotHeight(input) {
+      const value = Number(input.value);
+
+      if (!Number.isFinite(value)) {
+        return 450;
+      }
+
+      return Math.max(250, Math.min(900, value));
+    }
+
+    function getPressurePlotHeight() {
+      return readPlotHeight(pressurePlotHeightInput);
+    }
+
+    function getPVPlotHeight() {
+      return readPlotHeight(pvPlotHeightInput);
+    }
+
+    function readPVSteadyStart() {
+      const value = Number(pvSteadyStartInput.value);
+
+      if (!Number.isFinite(value) || value < 0) {
+        return 5.0;
+      }
+
+      return value;
+    }
+
+    function getPVTraceName() {
+      if (showPVTransientInput.checked) {
+        return "LV PV Loop - all";
+      }
+
+      return `LV PV Loop - t >= ${readPVSteadyStart()}s`;
+    }
+
+    function getScenario() {
+      return {
+        heartFailure: Number(heartFailureInput.value),
+        exercise: Number(exerciseInput.value)
+      };
+    }
+
+    function getScenarioLabel() {
+      const scenario = getScenario();
+
+      return {
+        heartFailure: scenario.heartFailure ? "Heart failure" : "Normal",
+        exercise: scenario.exercise ? "Exercise" : "Rest"
+      };
+    }
+
+    function updateLineWidths() {
+      if (!window.Plotly) {
+        return;
+      }
+
+      const pressureWidth = readLineWidth(pressureLineWidthInput);
+      const pvWidth = readLineWidth(pvLineWidthInput);
+
+      Plotly.restyle("pressure-plot", {
+        "line.width": pressureWidth
+      }, [0, 1]);
+
+      Plotly.restyle("pv-loop", {
+        "line.width": pvWidth
+      }, [0]);
+    }
+
+    function updatePlotHeights() {
+      if (!window.Plotly) {
+        return;
+      }
+
+      const pressureHeight = getPressurePlotHeight();
+      const pvHeight = getPVPlotHeight();
+
+      document.getElementById("pressure-plot").style.height = `${pressureHeight}px`;
+      document.getElementById("pv-loop").style.height = `${pvHeight}px`;
+
+      Plotly.relayout("pressure-plot", { height: pressureHeight });
+      Plotly.Plots.resize("pressure-plot");
+
+      Plotly.relayout("pv-loop", { height: pvHeight });
+      Plotly.Plots.resize("pv-loop");
+      updateStatus();
+    }
+
+    function buildPVLoopDataFromHistory() {
+      const pvSteadyStart = readPVSteadyStart();
+      const showTransient = showPVTransientInput.checked;
+      const pvT = [];
+      const pvVLV = [];
+      const pvPLV = [];
+
+      for (let i = 0; i < history.t.length; ++i) {
+        const t = history.t[i];
+
+        if (showTransient || t >= pvSteadyStart) {
+          pvT.push(t);
+          pvVLV.push(history.vLV[i]);
+          pvPLV.push(history.pLV[i]);
+        }
+      }
+
+      return {
+        pvT,
+        pvVLV,
+        pvPLV,
+        pvSteadyStart,
+        showTransient
+      };
+    }
+
+    function showOrUpdatePVLoop() {
+      if (!window.Plotly) {
+        return;
+      }
+
+      const pvData = buildPVLoopDataFromHistory();
+      pvLoopSection.style.display = "block";
+      pvLoopVisible = true;
+      pvLoopLastPointCount = pvData.pvVLV.length;
+
+      Plotly.react("pv-loop", [
+        {
+          x: pvData.pvVLV,
+          y: pvData.pvPLV,
+          mode: "lines",
+          name: pvData.showTransient ? "LV PV Loop - all" : `LV PV Loop - t >= ${pvData.pvSteadyStart}s`,
+          line: { width: readLineWidth(pvLineWidthInput) }
+        }
+      ], {
+        title: "LV Pressure-Volume Loop",
+        xaxis: { title: "LV Volume [mL]" },
+        yaxis: { title: "LV Pressure [mmHg]" },
+        height: getPVPlotHeight(),
+        margin: { t: 48, r: 24, b: 56, l: 64 }
+      }, plotConfig);
+
+      Plotly.Plots.resize("pv-loop");
+      console.log("PV loop updated", {
+        points: pvLoopLastPointCount,
+        steadyStart: pvData.pvSteadyStart,
+        showTransient: pvData.showTransient
+      });
+      updateStatus();
+    }
+
+    function hidePVLoop() {
+      pvLoopVisible = false;
+      pvLoopSection.style.display = "none";
+      updateStatus();
+    }
+
+    function clearHistory() {
+      history.t.length = 0;
+      history.pLV.length = 0;
+      history.pAO.length = 0;
+      history.vLV.length = 0;
+      pvLoopLastPointCount = 0;
+    }
+
+    function initModelFromControls() {
+      const scenario = getScenario();
+
+      window.cvs.initEx(60, dt, duration, scenario.heartFailure, scenario.exercise);
+    }
+
+    function getPressureLayout() {
+      return {
+        title: "Pressure-Time",
+        xaxis: { title: "Time [s]", range: [0, readWindowSeconds()] },
+        yaxis: { title: "Pressure [mmHg]" },
+        height: getPressurePlotHeight(),
+        margin: { t: 48, r: 24, b: 56, l: 64 }
+      };
+    }
+
+    function getPVLayout() {
+      return {
+        title: "LV Pressure-Volume Loop",
+        xaxis: { title: "LV Volume [mL]" },
+        yaxis: { title: "LV Pressure [mmHg]" },
+        height: getPVPlotHeight(),
+        margin: { t: 48, r: 24, b: 56, l: 64 }
+      };
+    }
+
+    function clearPlots() {
+      if (!window.Plotly) {
+        return;
+      }
+
+      Plotly.react("pressure-plot", [
+        { x: [], y: [], mode: "lines", name: "P_LV", line: { width: readLineWidth(pressureLineWidthInput) } },
+        { x: [], y: [], mode: "lines", name: "P_AO", line: { width: readLineWidth(pressureLineWidthInput) } }
+      ], getPressureLayout(), plotConfig);
+
+      Plotly.react("pv-loop", [
+        { x: [], y: [], mode: "lines", name: getPVTraceName(), line: { width: readLineWidth(pvLineWidthInput) } }
+      ], getPVLayout(), plotConfig);
+    }
+
+    function estimateHistoryBytes() {
+      return history.t.length * 4 * 8;
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) {
+        return `${bytes} B`;
+      }
+
+      if (bytes < 1024 * 1024) {
+        return `${(bytes / 1024).toFixed(1)} KB`;
+      }
+
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function isValidSample(t, pLV, pAO, vLV) {
+      return Number.isFinite(t) &&
+        Number.isFinite(pLV) &&
+        Number.isFinite(pAO) &&
+        Number.isFinite(vLV);
+    }
+
+    function updateStatus(pLV, pAO, vLV) {
+      if (!window.cvs) {
+        return;
+      }
+
+      const nowMs = performance.now();
+      const t = window.cvs.getTime();
+      const currentPLV = pLV ?? window.cvs.getPressure(4);
+      const currentPAO = pAO ?? window.cvs.getPressure(5);
+      const currentVLV = vLV ?? window.cvs.getVolume(4);
+      const realDelta = (nowMs - lastStatusUpdateMs) / 1000.0;
+      const simDelta = t - lastStatusTime;
+      const memoryEstimate = estimateHistoryBytes();
+      const memoryWarning = history.t.length > memoryWarningSamples
+        ? " | Large history: performance may degrade. Use Reset to clear memory."
+        : "";
+      const labels = getScenarioLabel();
+
+      if (realDelta > 0.25) {
+        simulatedSecondsPerRealSecond = simDelta / realDelta;
+        lastStatusUpdateMs = nowMs;
+        lastStatusTime = t;
+      }
+
+      statusElement.textContent = [
+        running ? "running" : "stopped",
+        `time=${t.toFixed(4)} s`,
+        `P_LV=${currentPLV.toFixed(4)}`,
+        `P_AO=${currentPAO.toFixed(4)}`,
+        `V_LV=${currentVLV.toFixed(4)}`,
+        `samples=${history.t.length}`,
+        `history=${history.t.length}`,
+        `memory≈${formatBytes(memoryEstimate)}`,
+        `sim/real=${simulatedSecondsPerRealSecond.toFixed(2)}x`,
+        `steps/frame=${readStepsPerFrame()}`,
+        `sampleEvery=${readSampleEvery()}`,
+        `pressureWidth=${readLineWidth(pressureLineWidthInput)}`,
+        `pvWidth=${readLineWidth(pvLineWidthInput)}`,
+        `pressureHeight=${getPressurePlotHeight()}px`,
+        `pvHeight=${getPVPlotHeight()}px`,
+        `Scenario: ${labels.heartFailure}`,
+        `Activity: ${labels.exercise}`,
+        `PV loop=${pvLoopVisible ? "visible" : "hidden"}`,
+        `PV steady start=${readPVSteadyStart()}s`,
+        `Show PV transient=${showPVTransientInput.checked ? "yes" : "no"}`,
+        `PV last points=${pvLoopLastPointCount}`,
+        "PV loop real-time=off"
+      ].join(" | ") + memoryWarning;
+    }
+
+    function initializePlots() {
+      if (!window.Plotly) {
+        statusElement.textContent = "Plotly.js did not load. Check internet access or vendor Plotly locally under web/vendor/.";
+        return false;
+      }
+
+      Plotly.newPlot("pressure-plot", [
+        {
+          x: [],
+          y: [],
+          mode: "lines",
+          name: "P_LV",
+          line: { width: readLineWidth(pressureLineWidthInput) }
+        },
+        {
+          x: [],
+          y: [],
+          mode: "lines",
+          name: "P_AO",
+          line: { width: readLineWidth(pressureLineWidthInput) }
+        }
+      ], {
+        title: "Pressure-Time",
+        xaxis: { title: "Time [s]", range: [0, readWindowSeconds()] },
+        yaxis: { title: "Pressure [mmHg]" },
+        height: getPressurePlotHeight(),
+        margin: { t: 48, r: 24, b: 56, l: 64 }
+      }, plotConfig);
+
+      Plotly.newPlot("pv-loop", [
+        {
+          x: [],
+          y: [],
+          mode: "lines",
+          name: getPVTraceName(),
+          line: { width: readLineWidth(pvLineWidthInput) }
+        }
+      ], {
+        title: "LV Pressure-Volume Loop",
+        xaxis: { title: "LV Volume [mL]" },
+        yaxis: { title: "LV Pressure [mmHg]" },
+        height: getPVPlotHeight(),
+        margin: { t: 48, r: 24, b: 56, l: 64 }
+      }, plotConfig);
+
+      return true;
+    }
+
+    function reset() {
+      running = false;
+      cancelAnimationFrame(animationFrameId);
+      sampleCounter = 0;
+      frameCounter = 0;
+      simulatedSecondsPerRealSecond = 0;
+      lastStatusUpdateMs = performance.now();
+      lastStatusTime = 0;
+      followLatest = followLatestInput.checked;
+      clearHistory();
+      initModelFromControls();
+      clearPlots();
+      hidePVLoop();
+
+      outputElement.textContent = "";
+      updateStatus(0, 0, window.cvs.getVolume(4));
+    }
+
+    function stop() {
+      running = false;
+      cancelAnimationFrame(animationFrameId);
+      updateStatus();
+    }
+
+    function restartWithCurrentScenario() {
+      if (!window.cvs) {
+        return;
+      }
+
+      const wasRunning = running;
+
+      stop();
+      clearHistory();
+      initModelFromControls();
+      clearPlots();
+      hidePVLoop();
+      sampleCounter = 0;
+      frameCounter = 0;
+      simulatedSecondsPerRealSecond = 0;
+      lastStatusUpdateMs = performance.now();
+      lastStatusTime = 0;
+      outputElement.textContent = "Scenario changed. Simulation restarted from t = 0.";
+      updateStatus(0, 0, window.cvs.getVolume(4));
+
+      if (wasRunning) {
+        start();
+      }
+    }
+
+    function appendSampleBatch(batchT, batchPLV, batchPAO) {
+      if (batchT.length > 0) {
+        Plotly.extendTraces("pressure-plot", {
+          x: [batchT, batchT],
+          y: [batchPLV, batchPAO]
+        }, [0, 1]);
+      }
+    }
+
+    function handleInvalidSample(t, pLV, pAO, vLV) {
+      stop();
+
+      const details = { t, pLV, pAO, vLV };
+      statusElement.textContent = "Invalid simulation sample; stopped.";
+      outputElement.textContent = JSON.stringify(details, null, 2);
+      console.error("CVS invalid sample:", details);
+    }
+
+    function animationLoop() {
+      if (!running) {
+        return;
+      }
+
+      let lastPLV = window.cvs.getPressure(4);
+      let lastPAO = window.cvs.getPressure(5);
+      let lastVLV = window.cvs.getVolume(4);
+      const stepsPerFrame = readStepsPerFrame();
+      const sampleEvery = readSampleEvery();
+      const batchT = [];
+      const batchPLV = [];
+      const batchPAO = [];
+
+      for (let i = 0; i < stepsPerFrame; ++i) {
+        window.cvs.step();
+
+        if (sampleCounter % sampleEvery === 0) {
+          const t = window.cvs.getTime();
+          const pLV = window.cvs.getPressure(4);
+          const pAO = window.cvs.getPressure(5);
+          const vLV = window.cvs.getVolume(4);
+
+          if (!isValidSample(t, pLV, pAO, vLV)) {
+            handleInvalidSample(t, pLV, pAO, vLV);
+            return;
+          }
+
+          history.t.push(t);
+          history.pLV.push(pLV);
+          history.pAO.push(pAO);
+          history.vLV.push(vLV);
+          batchT.push(t);
+          batchPLV.push(pLV);
+          batchPAO.push(pAO);
+          lastPLV = pLV;
+          lastPAO = pAO;
+          lastVLV = vLV;
+        }
+
+        sampleCounter += 1;
+      }
+
+      appendSampleBatch(batchT, batchPLV, batchPAO);
+
+      if (followLatest && history.t.length > 0) {
+        const t = history.t[history.t.length - 1];
+        const windowSeconds = readWindowSeconds();
+
+        Plotly.relayout("pressure-plot", {
+          "xaxis.range": [Math.max(0, t - windowSeconds), t]
+        });
+      }
+
+      if (frameCounter % 10 === 0) {
+        updateStatus(lastPLV, lastPAO, lastVLV);
+      }
+
+      frameCounter += 1;
+      animationFrameId = requestAnimationFrame(animationLoop);
+    }
+
+    function start() {
+      if (running) {
+        return;
+      }
+
+      if (!window.Plotly) {
+        statusElement.textContent = "Plotly.js did not load. Check internet access or vendor Plotly locally under web/vendor/.";
+        return;
+      }
+
+      running = true;
+      lastStatusUpdateMs = performance.now();
+      lastStatusTime = window.cvs.getTime();
+      animationFrameId = requestAnimationFrame(animationLoop);
+    }
+
+    followLatestInput.addEventListener("change", () => {
+      followLatest = followLatestInput.checked;
+    });
+
+    windowSecondsInput.addEventListener("change", () => {
+      if (followLatest && window.Plotly && window.cvs) {
+        const t = window.cvs.getTime();
+        const windowSeconds = readWindowSeconds();
+        Plotly.relayout("pressure-plot", {
+          "xaxis.range": [Math.max(0, t - windowSeconds), t]
+        });
+      }
+    });
+
+    pressureLineWidthInput.addEventListener("input", updateLineWidths);
+    pvLineWidthInput.addEventListener("input", updateLineWidths);
+    pressurePlotHeightInput.addEventListener("input", updatePlotHeights);
+    pvPlotHeightInput.addEventListener("input", updatePlotHeights);
+    heartFailureInput.addEventListener("change", restartWithCurrentScenario);
+    exerciseInput.addEventListener("change", restartWithCurrentScenario);
+    pvSteadyStartInput.addEventListener("change", () => {
+      if (pvLoopVisible) {
+        showOrUpdatePVLoop();
+      }
+      else {
+        updateStatus();
+      }
+    });
+    showPVTransientInput.addEventListener("change", () => {
+      if (pvLoopVisible) {
+        showOrUpdatePVLoop();
+      }
+      else {
+        updateStatus();
+      }
+    });
+
+    createCVSModule().then((Module) => {
+      const init = Module.cwrap("cvs_wasm_init", null, ["number", "number", "number"]);
+      const initEx = Module.cwrap("cvs_wasm_init_ex", null, ["number", "number", "number", "number", "number"]);
+      const initSolver = Module.cwrap("cvs_wasm_init_solver", null, ["number", "number", "number", "number", "number", "number"]);
+      const step = Module.cwrap("cvs_wasm_step", null, []);
+      const runSteps = Module.cwrap("cvs_wasm_run_steps", null, ["number"]);
+      const getTime = Module.cwrap("cvs_wasm_get_time", "number", []);
+      const getVolume = Module.cwrap("cvs_wasm_get_volume", "number", ["number"]);
+      const getPressure = Module.cwrap("cvs_wasm_get_pressure", "number", ["number"]);
+      const getFlow = Module.cwrap("cvs_wasm_get_flow", "number", ["number"]);
+      const getELV = Module.cwrap("cvs_wasm_get_e_lv", "number", []);
+      const getERV = Module.cwrap("cvs_wasm_get_e_rv", "number", []);
+
+      window.cvs = {
+        init,
+        initEx,
+        initSolver,
+        step,
+        runSteps,
+        getTime,
+        getVolume,
+        getPressure,
+        getFlow,
+        getELV,
+        getERV
+      };
+
+      window.cvsDemo = {
+        start,
+        stop,
+        reset,
+        restartWithCurrentScenario,
+        showOrUpdatePVLoop,
+        hidePVLoop,
+        getHistory: () => history,
+        updateLineWidths,
+        updatePlotHeights,
+        getScenario
+      };
+
+      const plotsReady = initializePlots();
+      reset();
+      setControlsEnabled(true);
+      startButton.addEventListener("click", start);
+      stopButton.addEventListener("click", stop);
+      resetButton.addEventListener("click", reset);
+      showPVLoopButton.addEventListener("click", showOrUpdatePVLoop);
+      hidePVLoopButton.addEventListener("click", hidePVLoop);
+
+      if (plotsReady) {
+        statusElement.textContent = "CVS WASM module loaded. Press Start or use window.cvs from the browser console.";
+      }
+
+      console.log("CVS WASM ready. Try: cvs.init(60, 1e-4, 40); cvs.step(); cvs.getTime();");
+    }).catch((error) => {
+      statusElement.textContent = "Failed to load CVS WASM module.";
+      outputElement.textContent = String(error);
+    });
+  </script>
+</body>
+</html>
